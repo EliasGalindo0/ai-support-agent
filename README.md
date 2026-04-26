@@ -82,7 +82,53 @@ API: http://localhost:8000
 Docs: http://localhost:8000/docs  
 Metrics: http://localhost:9090
 
-### 3. Run locally (development)
+### 3. Run locally with `just` (recommended)
+
+This project uses [`just`](https://github.com/casey/just) as a command runner for common tasks.
+
+**Install just:**
+```bash
+cargo install just  # or: brew install just  |  scoop install just
+```
+
+**Usage:**
+```bash
+just --list        # Show all available recipes
+just setup         # First-time setup: .env, venv, dependencies
+just seed          # Initialize DB and seed knowledge base + sample data
+just dev           # Start the API server locally
+just test          # Run the test suite
+just docker-up     # Start all services with Docker Compose
+just logs          # View live logs for all services
+```
+
+**Key recipes:**
+
+| Recipe | Description |
+|--------|-------------|
+| `setup` | First-time setup: creates `.env`, venv, installs dependencies |
+| `seed` | Initialize DB tables and seed KB + sample data |
+| `dev` | Start API server on http://localhost:8000 |
+| `test` | Run pytest suite |
+| `test-unit` | Run only fast unit tests (skip integration) |
+| `docker-up` | Start all services with Docker Compose |
+| `docker-down` | Stop all Docker Compose services |
+| `logs` | View live logs for all services |
+| `logs-api` | View logs for API service only |
+| `seed-docker` | Seed KB and DB data inside running Docker container |
+| `reset` | Reset local data (DB + embeddings) and re-seed |
+| `tools` | List all registered tools |
+| `cost` | Show current API cost usage (today) |
+
+**Quick curl demos:**
+```bash
+just curl-health     # Check API health
+just curl-chat       # Send a customer chat message
+just curl-internal   # Send an internal query
+just curl-escalate   # Trigger an escalation (legal keyword)
+```
+
+### 4. Run locally (manual)
 
 ```bash
 python -m venv .venv
@@ -92,7 +138,7 @@ python scripts/seed_kb.py        # Seed knowledge base
 python -m src.main
 ```
 
-### 4. Run tests
+### 5. Run tests
 
 ```bash
 pytest tests/ -v
