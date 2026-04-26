@@ -1,0 +1,44 @@
+# Core
+anthropic>=0.25.0
+openai>=1.30.0
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+
+# Memory & Storage
+redis>=5.0.0
+sqlalchemy>=2.0.0
+aiosqlite>=0.20.0
+
+# Vector search (lightweight, no heavy deps)
+numpy>=1.26.0
+scipy>=1.13.0
+
+# HTTP & async
+httpx>=0.27.0
+aiofiles>=23.2.1
+tenacity>=8.3.0
+
+# Observability
+structlog>=24.1.0
+prometheus-client>=0.20.0
+opentelemetry-api>=1.24.0
+opentelemetry-sdk>=1.24.0
+opentelemetry-instrumentation-fastapi>=0.45b0
+
+# Rate limiting
+slowapi>=0.1.9
+
+# Utilities
+python-dotenv>=1.0.1
+tiktoken>=0.7.0
+cachetools>=5.3.3
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Testing
+pytest>=8.2.0
+pytest-asyncio>=0.23.0
+pytest-mock>=3.14.0
+httpx>=0.27.0

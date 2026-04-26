@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: "ai_support_agent"
+    static_configs:
+      - targets: ["api:9090"]
