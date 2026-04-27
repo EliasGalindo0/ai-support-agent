@@ -61,6 +61,12 @@ A production-ready multi-agent AI system for customer support and internal opera
 
 ---
 
+## API Preview
+
+![AI Support Agent — Swagger UI](docs/screenshot-docs.png)
+
+---
+
 ## Quick Start
 
 ### 1. Clone and configure
