@@ -19,7 +19,7 @@ from typing import Any
 import structlog
 from tenacity import (
     AsyncRetrying,
-    retry_if_exception_type,
+    retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential,
 )
@@ -108,6 +108,10 @@ class DailyCostTracker:
 
 # Singleton tracker shared across all LLM calls.
 _daily_cost = DailyCostTracker()
+
+
+class BudgetExceededError(Exception):
+    """Raised when daily LLM cost budget is exhausted."""
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +312,6 @@ class _OpenAIBackend:
 # ---------------------------------------------------------------------------
 # Public LLM client
 # ---------------------------------------------------------------------------
-_RETRYABLE_ERRORS = (Exception,)  # narrowed inside retry logic
 
 
 class LLMClient:
@@ -360,6 +363,7 @@ class LLMClient:
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(3),
             wait=wait_exponential(multiplier=1, min=2, max=30),
+            retry=retry_if_not_exception_type(BudgetExceededError),
             reraise=True,
         ):
             with attempt:
@@ -392,7 +396,7 @@ class LLMClient:
 
         return response
 
-    def stream(
+    async def stream(
         self,
         messages: list[Message],
         system: str = "",
@@ -403,11 +407,16 @@ class LLMClient:
         """
         Return an async iterator that streams tokens for low-latency responses.
 
-        Not async itself — callers use ``async for chunk in client.stream(...):``.
-        Making this async def would double-wrap the async generator (returning a
-        coroutine of an iterator instead of the iterator directly).
+        Made async so the budget check can run before streaming starts.
+        Callers: ``async for chunk in await client.stream(...):``.
         """
         cfg = self._cfg
+        daily = await _daily_cost.get()
+        if daily >= cfg.cost_budget_daily_usd:
+            raise BudgetExceededError(
+                f"Daily budget ${cfg.cost_budget_daily_usd:.2f} exceeded "
+                f"(current: ${daily:.4f})"
+            )
         model = cfg.model_for(model_tier)  # type: ignore[arg-type]
         max_tok = max_tokens or cfg.max_tokens_per_request
         return self._backend.stream(
@@ -421,7 +430,3 @@ class LLMClient:
     @staticmethod
     async def get_daily_cost() -> float:
         return await _daily_cost.get()
-
-
-class BudgetExceededError(Exception):
-    """Raised when daily LLM cost budget is exhausted."""

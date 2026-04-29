@@ -138,6 +138,7 @@ class LongTermMemory:
             result = await session.execute(
                 select(Conversation)
                 .where(Conversation.session_id == session_id)
+                .order_by(Conversation.created_at.desc())
                 .limit(1)
             )
             conv = result.scalar_one_or_none()

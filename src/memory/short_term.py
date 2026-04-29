@@ -10,6 +10,7 @@ Design:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import defaultdict
 from typing import Any
@@ -54,8 +55,16 @@ class ShortTermMemory:
             self._redis = None
         return self._redis
 
+    @staticmethod
+    def _safe_id(session_id: str) -> str:
+        """
+        Hash the session_id so that untrusted values cannot inject colons or
+        other characters that would collide with unrelated Redis key patterns.
+        """
+        return hashlib.sha256(session_id.encode()).hexdigest()
+
     def _session_key(self, session_id: str) -> str:
-        return f"session:{session_id}:messages"
+        return f"session:{self._safe_id(session_id)}:messages"
 
     async def add_message(self, session_id: str, message: Message) -> None:
         payload = json.dumps({"role": message.role, "content": message.content})
@@ -118,8 +127,16 @@ class ShortTermMemory:
 
     async def set_metadata(self, session_id: str, key: str, value: str) -> None:
         """Store arbitrary session metadata (user info, flags, etc.)."""
-        meta_key = f"session:{session_id}:meta"
+        meta_key = f"session:{self._safe_id(session_id)}:meta"
         if self._use_fallback:
+            # Persist metadata in fallback dict so sticky routing still works.
+            self._fallback.setdefault(f"__meta:{session_id}", [])
+            # Store as a synthetic list entry keyed like "meta:key=value".
+            self._fallback[f"__meta:{session_id}"] = [
+                e for e in self._fallback[f"__meta:{session_id}"]
+                if not e.startswith(f"{key}=")
+            ]
+            self._fallback[f"__meta:{session_id}"].append(f"{key}={value}")
             return
 
         redis = await self._get_redis()
@@ -128,8 +145,11 @@ class ShortTermMemory:
             await redis.expire(meta_key, self._cfg.redis_ttl_seconds)
 
     async def get_metadata(self, session_id: str, key: str) -> str | None:
-        meta_key = f"session:{session_id}:meta"
+        meta_key = f"session:{self._safe_id(session_id)}:meta"
         if self._use_fallback:
+            for entry in self._fallback.get(f"__meta:{session_id}", []):
+                if entry.startswith(f"{key}="):
+                    return entry[len(key) + 1:]
             return None
 
         redis = await self._get_redis()

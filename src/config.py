@@ -5,7 +5,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -79,6 +79,26 @@ class Settings(BaseSettings):
     @classmethod
     def _strip(cls, v: str) -> str:
         return (v or "").strip()
+
+    @model_validator(mode="after")
+    def _validate_production_secrets(self) -> "Settings":
+        if self.environment == Environment.PRODUCTION:
+            if self.api_secret_key == "change-me":
+                raise ValueError(
+                    "api_secret_key must be set to a secure value in production. "
+                    "Set the API_SECRET_KEY environment variable."
+                )
+        if self.llm_provider == LLMProvider.ANTHROPIC and not self.anthropic_api_key:
+            raise ValueError(
+                "anthropic_api_key is required when llm_provider=anthropic. "
+                "Set the ANTHROPIC_API_KEY environment variable."
+            )
+        if self.llm_provider == LLMProvider.OPENAI and not self.openai_api_key:
+            raise ValueError(
+                "openai_api_key is required when llm_provider=openai. "
+                "Set the OPENAI_API_KEY environment variable."
+            )
+        return self
 
     @property
     def is_production(self) -> bool:

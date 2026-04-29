@@ -16,8 +16,8 @@ Embeddings are used for:
 """
 from __future__ import annotations
 
+import asyncio
 import json
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -138,7 +138,8 @@ class VectorStore:
         else:
             self._embedder = _FallbackEmbedder(dim=cfg.embedding_dim)
 
-        # In-memory index
+        # In-memory index — guarded by _lock for concurrent add/delete safety.
+        self._lock = asyncio.Lock()
         self._vectors: np.ndarray | None = None     # shape (N, dim)
         self._documents: list[VectorDocument] = []
 
@@ -165,19 +166,25 @@ class VectorStore:
             self._vectors = None
             self._documents = []
 
-    def _save(self) -> None:
+    def _save_sync(self) -> None:
+        """Synchronous disk write — must be called via run_in_executor."""
+        self._index_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._vectors is not None:
+            np.savez_compressed(str(self._index_path), vectors=self._vectors)
+        with open(self._meta_path, "w") as f:
+            json.dump(
+                [
+                    {"id": d.id, "text": d.text, "metadata": d.metadata}
+                    for d in self._documents
+                ],
+                f,
+            )
+
+    async def _save(self) -> None:
+        """Persist the index to disk without blocking the event loop."""
         try:
-            self._index_path.parent.mkdir(parents=True, exist_ok=True)
-            if self._vectors is not None:
-                np.savez_compressed(str(self._index_path), vectors=self._vectors)
-            with open(self._meta_path, "w") as f:
-                json.dump(
-                    [
-                        {"id": d.id, "text": d.text, "metadata": d.metadata}
-                        for d in self._documents
-                    ],
-                    f,
-                )
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self._save_sync)
         except Exception as exc:
             log.error("vector_store.save_failed", error=str(exc))
 
@@ -188,13 +195,13 @@ class VectorStore:
         texts = [d.text for d in documents]
         new_vectors = await self._embedder.embed(texts)
 
-        if self._vectors is None:
-            self._vectors = new_vectors
-        else:
-            self._vectors = np.vstack([self._vectors, new_vectors])
-
-        self._documents.extend(documents)
-        self._save()
+        async with self._lock:
+            if self._vectors is None:
+                self._vectors = new_vectors
+            else:
+                self._vectors = np.vstack([self._vectors, new_vectors])
+            self._documents.extend(documents)
+            await self._save()
 
         log.info(
             "vector_store.added",
@@ -242,19 +249,20 @@ class VectorStore:
         ]
 
     async def delete(self, doc_id: str) -> bool:
-        idx = next(
-            (i for i, d in enumerate(self._documents) if d.id == doc_id), None
-        )
-        if idx is None:
-            return False
+        async with self._lock:
+            idx = next(
+                (i for i, d in enumerate(self._documents) if d.id == doc_id), None
+            )
+            if idx is None:
+                return False
 
-        self._documents.pop(idx)
-        if self._vectors is not None:
-            self._vectors = np.delete(self._vectors, idx, axis=0)
-            if len(self._documents) == 0:
-                self._vectors = None
+            self._documents.pop(idx)
+            if self._vectors is not None:
+                self._vectors = np.delete(self._vectors, idx, axis=0)
+                if len(self._documents) == 0:
+                    self._vectors = None
 
-        self._save()
+            await self._save()
         return True
 
     def count(self) -> int:

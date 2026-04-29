@@ -233,7 +233,12 @@ class BaseAgent:
                     args=tc.arguments,
                 )
 
-                result = await tool_registry.execute(tc.name, tc.arguments)
+            # Execute all tool calls concurrently; order results to match calls.
+            results = await asyncio.gather(
+                *(tool_registry.execute(tc.name, tc.arguments) for tc in llm_response.tool_calls),
+                return_exceptions=False,
+            )
+            for tc, result in zip(llm_response.tool_calls, results):
                 tool_result_msg = Message(
                     role="user",
                     content=f"[Tool result for {tc.name}]\n{result.to_llm_content()}",
@@ -362,12 +367,16 @@ class BaseAgent:
         )
         summary_text = f"[Conversation summary]\n{summary_response.content}"
 
-        # Rebuild history: summary + second half
+        # Rebuild history: summary + second half.
+        # The summary is injected as role="user" because Anthropic requires
+        # conversations to begin with a user turn, not an assistant turn.
         remaining = history[len(history) // 2:]
         await self._short_term.clear_session(session_id)
         await self._short_term.add_message(
-            session_id, Message(role="assistant", content=summary_text)
+            session_id, Message(role="user", content=summary_text)
         )
+        # Ensure the remaining messages don't start with another user message
+        # back-to-back (which would be invalid); skip leading user messages if needed.
         for msg in remaining:
             await self._short_term.add_message(session_id, msg)
 

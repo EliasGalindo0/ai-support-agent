@@ -87,9 +87,11 @@ class Orchestrator:
         # Lazy-init agents (avoid creating LLM clients until needed)
         self._agents: dict[str, BaseAgent] = {}
 
+    _KNOWN_AGENTS: dict[str, type[BaseAgent]] = {}  # set below after imports resolve
+
     def _get_agent(self, agent_type: str) -> BaseAgent:
         if agent_type not in self._agents:
-            agent_map = {
+            agent_map: dict[str, type[BaseAgent]] = {
                 "customer_support": CustomerSupportAgent,
                 "internal_ops": InternalOpsAgent,
                 "knowledge_base": KnowledgeBaseAgent,
@@ -97,7 +99,12 @@ class Orchestrator:
             }
             cls = agent_map.get(agent_type)
             if cls is None:
-                raise ValueError(f"Unknown agent type: {agent_type}")
+                log.warning(
+                    "orchestrator.unknown_agent_type",
+                    requested=agent_type,
+                    fallback="customer_support",
+                )
+                cls = CustomerSupportAgent
             self._agents[agent_type] = cls(
                 llm_client=self._llm,
                 short_term=self._short_term,

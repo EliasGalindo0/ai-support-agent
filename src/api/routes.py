@@ -11,12 +11,13 @@ Endpoints:
 """
 from __future__ import annotations
 
+import secrets
 import uuid
 from typing import Any
 
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.agents.orchestrator import Orchestrator
 from src.llm.client import LLMClient
@@ -54,7 +55,8 @@ def _require_internal_token(x_internal_token: str = Header(default="")):
     """Simple internal API token check. Replace with proper auth (OAuth2, JWT)."""
     from src.config import get_settings
     expected = get_settings().api_secret_key
-    if x_internal_token != expected:
+    # Use compare_digest to prevent timing-based token enumeration attacks.
+    if not secrets.compare_digest(x_internal_token, expected):
         raise HTTPException(status_code=403, detail="Forbidden")
     return x_internal_token
 
@@ -63,18 +65,19 @@ def _require_internal_token(x_internal_token: str = Header(default="")):
 # Request / Response models
 # ---------------------------------------------------------------------------
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=4000)
-    session_id: str | None = Field(default=None, description="Omit to start a new session")
-    user_id: str | None = None
-    user_email: str | None = None
-
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "message": "I need help tracking my order ORD-12345.",
                 "user_email": "customer@example.com",
             }
         }
+    )
+
+    message: str = Field(..., min_length=1, max_length=4000)
+    session_id: str | None = Field(default=None, description="Omit to start a new session")
+    user_id: str | None = None
+    user_email: str | None = None
 
 
 class ChatResponse(BaseModel):

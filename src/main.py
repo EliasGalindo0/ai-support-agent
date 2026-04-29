@@ -10,7 +10,8 @@ Startup sequence:
 """
 from __future__ import annotations
 
-import asyncio
+import uuid
+from contextlib import asynccontextmanager
 
 import structlog
 import uvicorn
@@ -39,12 +40,23 @@ def create_app() -> FastAPI:
     configure_logging()
     cfg = get_settings()
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        log.info("app.starting", environment=cfg.environment.value)
+        start_metrics_server()
+        db = LongTermMemory()
+        await db.init_db()
+        log.info("app.started")
+        yield
+        log.info("app.shutting_down")
+
     app = FastAPI(
         title="AI Support Agent",
         description="Production-grade multi-agent customer support system.",
         version="1.0.0",
         docs_url="/docs" if not cfg.is_production else None,  # Disable Swagger in prod
         redoc_url=None,
+        lifespan=lifespan,
     )
 
     # --- Rate limiting ---
@@ -64,7 +76,6 @@ def create_app() -> FastAPI:
     # --- Request ID middleware ---
     @app.middleware("http")
     async def add_request_id(request: Request, call_next):
-        import uuid
         request_id = str(uuid.uuid4())
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=request_id)
@@ -75,7 +86,7 @@ def create_app() -> FastAPI:
     # --- Global error handler ---
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
-        log.error("unhandled_exception", error=str(exc), path=request.url.path)
+        log.error("unhandled_exception", error=str(exc), path=request.url.path, exc_info=True)
         return JSONResponse(
             status_code=500,
             content={"detail": "Internal server error"},
@@ -83,18 +94,6 @@ def create_app() -> FastAPI:
 
     # --- Routes ---
     app.include_router(router, prefix="/api/v1")
-
-    @app.on_event("startup")
-    async def startup():
-        log.info("app.starting", environment=cfg.environment.value)
-        start_metrics_server()
-        db = LongTermMemory()
-        await db.init_db()
-        log.info("app.started")
-
-    @app.on_event("shutdown")
-    async def shutdown():
-        log.info("app.shutting_down")
 
     return app
 
