@@ -16,7 +16,7 @@ import uuid
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.agents.orchestrator import Orchestrator
@@ -75,7 +75,10 @@ class ChatRequest(BaseModel):
     )
 
     message: str = Field(..., min_length=1, max_length=4000)
-    session_id: str | None = Field(default=None, description="Omit to start a new session")
+    session_id: str | None = Field(
+        default=None,
+        description="Omit to start a new session",
+    )
     user_id: str | None = None
     user_email: str | None = None
 
@@ -225,10 +228,11 @@ async def health():
 
     # Check Redis
     try:
+        import asyncio
         import redis.asyncio as aioredis
         from src.config import get_settings
         r = aioredis.from_url(get_settings().redis_url)
-        await r.ping()
+        await asyncio.wait_for(r.ping(), timeout=1.5)
         components["redis"] = "ok"
         await r.aclose()
     except Exception:

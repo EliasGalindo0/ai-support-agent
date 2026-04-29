@@ -12,10 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-from src.agents.base_agent import BaseAgent, AgentResponse
-from src.agents.orchestrator import Orchestrator, _has_escalation_signal, _is_internal_user
+from src.agents.base_agent import BaseAgent
+from src.agents.orchestrator import (
+    Orchestrator,
+    _has_escalation_signal,
+    _is_internal_user,
+)
 from src.llm.client import LLMResponse, Message
 from src.memory.short_term import ShortTermMemory
 from src.memory.long_term import LongTermMemory
@@ -56,7 +60,6 @@ def make_mock_memory():
 
 async def make_mock_long_term():
     """In-memory long-term memory (SQLite)."""
-    import tempfile, os
     db = LongTermMemory()
     # Override to use in-memory SQLite for tests
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
@@ -178,6 +181,30 @@ class TestBaseAgentLoop:
             )
 
         assert response.escalated is True
+
+    async def test_agent_timeout_returns_escalated_response(self):
+        """If the agent exceeds its latency budget, it returns an escalated response."""
+        from src.config import get_settings
+
+        mock_llm = AsyncMock()
+        # Simulate a very slow LLM call (agent timeout should interrupt first)
+        mock_llm.complete = AsyncMock(side_effect=lambda **_: asyncio.sleep(10))
+
+        long_term = await make_mock_long_term()
+        agent = BaseAgent(
+            llm_client=mock_llm,
+            short_term=make_mock_memory(),
+            long_term=long_term,
+        )
+
+        with patch.object(get_settings(), "agent_timeout_seconds", 0.01):
+            response = await agent.run(
+                user_message="This should time out",
+                session_id="test-session-timeout",
+            )
+
+        assert response.escalated is True
+        assert "couldn't finish in time" in response.text.lower()
 
 
 # ---------------------------------------------------------------------------

@@ -127,21 +127,43 @@ class BaseAgent:
         )
 
         # Build tool list
-        tools: list[ToolDefinition] = tool_registry.get_definitions(self.tool_names)
+        tools: list[ToolDefinition] = tool_registry.get_definitions(
+            self.tool_names
+        )
 
         # Build system prompt (can be enriched by subclass)
-        system = await self._build_system_prompt(session_id, user_id, extra_context)
+        system = await self._build_system_prompt(
+            session_id, user_id, extra_context
+        )
 
         # Run ReAct loop
-        response = await asyncio.wait_for(
-            self._react_loop(
+        try:
+            response = await asyncio.wait_for(
+                self._react_loop(
+                    session_id=session_id,
+                    user_id=user_id,
+                    system=system,
+                    tools=tools,
+                ),
+                timeout=cfg.agent_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            log.error(
+                "agent.run.timeout",
+                agent=self.agent_type,
                 session_id=session_id,
-                user_id=user_id,
-                system=system,
-                tools=tools,
-            ),
-            timeout=cfg.agent_timeout_seconds,
-        )
+                timeout_seconds=cfg.agent_timeout_seconds,
+            )
+            return AgentResponse(
+                text=(
+                    "I'm sorry — I'm taking longer than expected and couldn't "
+                    "finish in time. I've escalated this to a specialist so "
+                    "you can get help quickly."
+                ),
+                session_id=session_id,
+                agent_type=self.agent_type,
+                escalated=True,
+            )
 
         response.latency_ms = (time.perf_counter() - t0) * 1000
 

@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     cost_alert_threshold_usd: float = 40.0
     max_tokens_per_request: int = 4096
     max_context_tokens: int = 100_000
+    llm_timeout_seconds: float = 30.0
 
     # Memory
     max_short_term_messages: int = 20
@@ -88,7 +89,10 @@ class Settings(BaseSettings):
                     "api_secret_key must be set to a secure value in production. "
                     "Set the API_SECRET_KEY environment variable."
                 )
-        if self.llm_provider == LLMProvider.ANTHROPIC and not self.anthropic_api_key:
+        if (
+            self.llm_provider == LLMProvider.ANTHROPIC
+            and not self.anthropic_api_key
+        ):
             raise ValueError(
                 "anthropic_api_key is required when llm_provider=anthropic. "
                 "Set the ANTHROPIC_API_KEY environment variable."

@@ -131,8 +131,6 @@ class _AnthropicBackend:
         max_tokens: int,
         temperature: float,
     ) -> LLMResponse:
-        import anthropic
-
         anthropic_msgs = [{"role": m.role, "content": m.content} for m in messages]
         anthropic_tools = [
             {
@@ -367,13 +365,16 @@ class LLMClient:
             reraise=True,
         ):
             with attempt:
-                response = await self._backend.complete(
-                    model=model,
-                    messages=messages,
-                    system=system,
-                    tools=tools or [],
-                    max_tokens=max_tok,
-                    temperature=temperature,
+                response = await asyncio.wait_for(
+                    self._backend.complete(
+                        model=model,
+                        messages=messages,
+                        system=system,
+                        tools=tools or [],
+                        max_tokens=max_tok,
+                        temperature=temperature,
+                    ),
+                    timeout=cfg.llm_timeout_seconds,
                 )
 
         total = await _daily_cost.add(response.cost_usd)

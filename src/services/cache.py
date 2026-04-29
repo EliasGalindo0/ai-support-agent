@@ -15,8 +15,6 @@ Tool-calling responses are NEVER cached — they reflect live state.
 from __future__ import annotations
 
 import hashlib
-import json
-from typing import Any, Optional
 
 import structlog
 
@@ -24,7 +22,7 @@ from src.config import get_settings
 
 log = structlog.get_logger(__name__)
 
-_CACHEABLE_AGENTS = {"knowledge_base"}          # Only KB responses are safe to cache
+_CACHEABLE_AGENTS = {"knowledge_base"}  # Only KB responses are safe to cache
 _KB_CACHE_TTL = 3600                            # 1 hour for KB
 _DEFAULT_CACHE_TTL = 300                        # 5 min for others
 
@@ -89,10 +87,15 @@ class ResponseCache:
         redis = await self._get_redis()
 
         if redis:
-            cached = await redis.get(key)
-            if cached:
-                log.info("cache.hit", namespace=namespace, key=key[:16])
-                return cached
+            try:
+                cached = await redis.get(key)
+                if cached:
+                    log.info("cache.hit", namespace=namespace, key=key[:16])
+                    return cached
+            except Exception as exc:
+                log.warning(
+                    "cache.redis_get_failed", namespace=namespace, error=str(exc)
+                )
         elif key in self._local:
             log.info("cache.hit.local", namespace=namespace)
             return self._local[key]
@@ -115,13 +118,27 @@ class ResponseCache:
 
         redis = await self._get_redis()
         if redis:
-            pipe = redis.pipeline()
-            pipe.setex(key, ttl, response)
-            # Track key in namespace tag set for O(1) bulk invalidation
-            pipe.sadd(_invalidation_tag_key(namespace), key)
-            pipe.expire(_invalidation_tag_key(namespace), ttl + 60)
-            await pipe.execute()
-            log.info("cache.set", agent_type=agent_type, namespace=namespace, ttl=ttl)
+            try:
+                pipe = redis.pipeline()
+                pipe.setex(key, ttl, response)
+                # Track key in namespace tag set for O(1) bulk invalidation
+                pipe.sadd(_invalidation_tag_key(namespace), key)
+                pipe.expire(_invalidation_tag_key(namespace), ttl + 60)
+                await pipe.execute()
+                log.info(
+                    "cache.set",
+                    agent_type=agent_type,
+                    namespace=namespace,
+                    ttl=ttl,
+                )
+            except Exception as exc:
+                log.warning(
+                    "cache.redis_set_failed",
+                    agent_type=agent_type,
+                    namespace=namespace,
+                    error=str(exc),
+                )
+                self._local[key] = response
         else:
             self._local[key] = response
 
@@ -137,15 +154,31 @@ class ResponseCache:
             return 0
 
         tag_key = _invalidation_tag_key(namespace)
-        keys = await redis.smembers(tag_key)
+        try:
+            keys = await redis.smembers(tag_key)
+        except Exception as exc:
+            log.warning(
+                "cache.redis_invalidate_read_failed",
+                namespace=namespace,
+                error=str(exc),
+            )
+            return 0
         if not keys:
             return 0
 
-        pipe = redis.pipeline()
-        for k in keys:
-            pipe.delete(k)
-        pipe.delete(tag_key)
-        results = await pipe.execute()
-        deleted = sum(1 for r in results[:-1] if r)
-        log.info("cache.invalidated", namespace=namespace, deleted=deleted)
-        return deleted
+        try:
+            pipe = redis.pipeline()
+            for k in keys:
+                pipe.delete(k)
+            pipe.delete(tag_key)
+            results = await pipe.execute()
+            deleted = sum(1 for r in results[:-1] if r)
+            log.info("cache.invalidated", namespace=namespace, deleted=deleted)
+            return deleted
+        except Exception as exc:
+            log.warning(
+                "cache.redis_invalidate_failed",
+                namespace=namespace,
+                error=str(exc),
+            )
+            return 0
